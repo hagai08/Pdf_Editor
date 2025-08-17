@@ -228,14 +228,47 @@ class PDFEditor(QMainWindow):
     def save_pdf(self):
         if not self.pdf_doc:
             return
-        # render the page with drawings back into PDF
-        img = self.image_item.pixmap().toImage()
-        buffer = img.bits().asstring(img.byteCount())
-        pix = fitz.Pixmap(fitz.csRGB, img.width(), img.height(), buffer)
-        self.pdf_doc[self.current_page_index].insert_image(self.current_page.rect, pixmap=pix)
-        file, _ = QFileDialog.getSaveFileName(self, "Save PDF", "", "PDF Files (*.pdf)")
-        if file:
-            self.pdf_doc.save(file)
+            
+        try:
+            # Get save location from user
+            file, _ = QFileDialog.getSaveFileName(self, "Save PDF", "", "PDF Files (*.pdf)")
+            if not file:
+                return
+
+            # Get the current pixmap with all annotations
+            pixmap = self.image_item.pixmap()
+            
+            # Save as temporary image first
+            temp_image_path = "temp_image.png"
+            pixmap.save(temp_image_path)
+            
+            # Create a new PDF document
+            new_doc = fitz.open()
+            
+            # Get page dimensions
+            width = pixmap.width()
+            height = pixmap.height()
+            
+            # Create a new page
+            page = new_doc.new_page(width=width, height=height)
+            
+            # Insert the image
+            rect = page.rect
+            page.insert_image(rect, filename=temp_image_path)
+            
+            # Save and close
+            new_doc.save(file)
+            new_doc.close()
+            
+            # Clean up temporary file
+            import os
+            if os.path.exists(temp_image_path):
+                os.remove(temp_image_path)
+                
+            QMessageBox.information(self, "Success", "PDF saved successfully!")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not save PDF: {str(e)}")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
