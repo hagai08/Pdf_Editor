@@ -395,7 +395,7 @@ class PDFEditor(QMainWindow):
             if ok and text:
                 text_item = MovableTextItem(text, self.undo_stack)
                 font = text_item.font()
-                font.setPointSize(24)
+                font.setPointSize(14)
                 text_item.setFont(font)
                 text_item.setDefaultTextColor(Qt.black)
                 text_item.setPos(scene_pos)
