@@ -5,6 +5,9 @@ from PyQt5.QtCore import Qt, QPoint
 import fitz  # PyMuPDF
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, 
                             QPushButton, QLabel, QFrame)
+from PyQt5.QtWidgets import (QGraphicsItem, QGraphicsTextItem, 
+                           QGraphicsPixmapItem, QGraphicsSceneMouseEvent)
+from PyQt5.QtCore import QRectF, QPointF
 
 class DrawingArea(QFrame):
     def __init__(self, parent=None):
@@ -76,6 +79,97 @@ class SignatureDialog(QDialog):
     def get_signature(self):
         return self.drawing_area.canvas.toImage()
 
+class MovableTextItem(QGraphicsTextItem):
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self.setFlag(QGraphicsItem.ItemIsMovable)
+        self.setFlag(QGraphicsItem.ItemIsSelectable)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges)
+        
+        self.resizing = False
+        self.handle_size = 10
+        
+    def boundingRect(self):
+        rect = super().boundingRect()
+        return rect.adjusted(-self.handle_size/2, -self.handle_size/2, 
+                           self.handle_size/2, self.handle_size/2)
+    
+    def paint(self, painter, option, widget):
+        super().paint(painter, option, widget)
+        if self.isSelected():
+            # Convert float coordinates to integers
+            x = int(self.boundingRect().bottomRight().x() - self.handle_size)
+            y = int(self.boundingRect().bottomRight().y() - self.handle_size)
+            # Draw resize handle with integer coordinates
+            painter.drawRect(x, y, self.handle_size, self.handle_size)
+    
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
+        if (event.pos().x() > self.boundingRect().right() - self.handle_size and 
+            event.pos().y() > self.boundingRect().bottom() - self.handle_size):
+            self.resizing = True
+        else:
+            super().mousePressEvent(event)
+    
+    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
+        if self.resizing:
+            # Calculate new scale based on mouse movement
+            new_size = event.pos().x() / self.boundingRect().width()
+            font = self.font()
+            font.setPointSize(int(font.pointSize() * new_size))
+            self.setFont(font)
+        else:
+            super().mouseMoveEvent(event)
+    
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
+        self.resizing = False
+        super().mouseReleaseEvent(event)
+
+class MovableSignatureItem(QGraphicsPixmapItem):
+    def __init__(self, pixmap, parent=None):
+        super().__init__(pixmap, parent)
+        self.setFlag(QGraphicsItem.ItemIsMovable)
+        self.setFlag(QGraphicsItem.ItemIsSelectable)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges)
+        
+        self.resizing = False
+        self.handle_size = 10
+        self.original_pixmap = pixmap
+        
+    def paint(self, painter, option, widget):
+        super().paint(painter, option, widget)
+        if self.isSelected():
+            # Convert float coordinates to integers
+            x = int(self.boundingRect().bottomRight().x() - self.handle_size)
+            y = int(self.boundingRect().bottomRight().y() - self.handle_size)
+            # Draw resize handle with integer coordinates
+            painter.drawRect(x, y, self.handle_size, self.handle_size)
+    
+    def mousePressEvent(self, event):
+        if (event.pos().x() > self.boundingRect().right() - self.handle_size and 
+            event.pos().y() > self.boundingRect().bottom() - self.handle_size):
+            self.resizing = True
+        else:
+            super().mousePressEvent(event)
+    
+    def mouseMoveEvent(self, event):
+        if self.resizing:
+            # Calculate new size maintaining aspect ratio
+            new_width = event.pos().x()
+            aspect_ratio = self.original_pixmap.height() / self.original_pixmap.width()
+            new_height = new_width * aspect_ratio
+            
+            # Scale the pixmap
+            scaled_pixmap = self.original_pixmap.scaled(int(new_width), int(new_height), 
+                                                      Qt.KeepAspectRatio, 
+                                                      Qt.SmoothTransformation)
+            self.setPixmap(scaled_pixmap)
+        else:
+            super().mouseMoveEvent(event)
+    
+    def mouseReleaseEvent(self, event):
+        self.resizing = False
+        super().mouseReleaseEvent(event)
+
 class PDFEditor(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -142,35 +236,24 @@ class PDFEditor(QMainWindow):
         text, ok = QInputDialog.getText(self, 'Add Text', 'Enter text:')
         
         if ok and text:
-            temp_pixmap = QPixmap(self.canvas.size())
-            temp_pixmap.fill(Qt.transparent)
-            
-            painter = QPainter(temp_pixmap)
-            painter.setPen(QPen(Qt.black, 2))
-            font = painter.font()
+            text_item = MovableTextItem(text)
+            font = text_item.font()
             font.setPointSize(24)
-            painter.setFont(font)
-            painter.drawText(int(scene_pos.x()), int(scene_pos.y()), text)
-            painter.end()
-            
-            final_painter = QPainter(self.canvas)
-            final_painter.drawPixmap(0, 0, temp_pixmap)
-            final_painter.end()
-            
-            self.update_canvas()
+            text_item.setFont(font)
+            text_item.setDefaultTextColor(Qt.black)
+            text_item.setPos(scene_pos)
+            self.scene.addItem(text_item)
 
     def add_signature_at_position(self, signature, scene_pos):
         """Handle adding signature at the specified position"""
-        painter = QPainter(self.canvas)
-        scaled_signature = signature.scaled(200, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        signature_pixmap = QPixmap.fromImage(signature)
+        scaled_signature = signature_pixmap.scaled(200, 100, Qt.KeepAspectRatio, 
+                                             Qt.SmoothTransformation)
         
-        x = int(scene_pos.x() - scaled_signature.width() / 2)
-        y = int(scene_pos.y() - scaled_signature.height() / 2)
-        
-        painter.drawImage(x, y, scaled_signature)
-        painter.end()
-        
-        self.update_canvas()
+        signature_item = MovableSignatureItem(scaled_signature)
+        signature_item.setPos(scene_pos.x() - scaled_signature.width()/2,
+                         scene_pos.y() - scaled_signature.height()/2)
+        self.scene.addItem(signature_item)
 
     def sign_mode(self):
         dialog = SignatureDialog(self)
@@ -184,10 +267,7 @@ class PDFEditor(QMainWindow):
         if not self.scene.items():
             return
         if event.button() == Qt.LeftButton:
-            if self.mode == "sign":
-                self.is_drawing = True
-                self.last_point = event.pos()
-            elif self.mode == "text":
+            if self.mode == "text":
                 view_pos = self.view.mapFrom(self, event.pos())
                 scene_pos = self.view.mapToScene(view_pos)
                 self.add_text_at_position(scene_pos)
