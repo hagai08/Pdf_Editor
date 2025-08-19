@@ -99,4 +99,4 @@ License
 MIT License. Feel free to use and modify this project.
 
 Author
-Your Name – Python / PyQt5 Developer
+Hagai Aricha – Python / PyQt5 Developer
