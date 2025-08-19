@@ -1,5 +1,7 @@
 import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow, QFileDialog, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QFileDialog, QGraphicsView, 
+                            QGraphicsScene, QGraphicsPixmapItem, QPushButton, 
+                            QMessageBox)  # Added QMessageBox here
 from PyQt5.QtGui import QPixmap, QPainter, QPen, QImage
 from PyQt5.QtCore import Qt, QPoint
 import fitz  # PyMuPDF
@@ -88,6 +90,7 @@ class MovableTextItem(QGraphicsTextItem):
         
         self.resizing = False
         self.handle_size = 10
+        self.min_font_size = 8  # Add minimum font size limit
         
     def boundingRect(self):
         rect = super().boundingRect()
@@ -115,8 +118,13 @@ class MovableTextItem(QGraphicsTextItem):
             # Calculate new scale based on mouse movement
             new_size = event.pos().x() / self.boundingRect().width()
             font = self.font()
-            font.setPointSize(int(font.pointSize() * new_size))
-            self.setFont(font)
+            new_point_size = int(font.pointSize() * new_size)
+            # Enforce minimum size
+            if new_point_size >= self.min_font_size:
+                font.setPointSize(new_point_size)
+                self.setFont(font)
+                # Update the scene immediately for smooth visual feedback
+                self.scene().update()
         else:
             super().mouseMoveEvent(event)
     
@@ -134,6 +142,7 @@ class MovableSignatureItem(QGraphicsPixmapItem):
         self.resizing = False
         self.handle_size = 10
         self.original_pixmap = pixmap
+        self.min_width = 50  # Add minimum width limit
         
     def paint(self, painter, option, widget):
         super().paint(painter, option, widget)
@@ -154,15 +163,20 @@ class MovableSignatureItem(QGraphicsPixmapItem):
     def mouseMoveEvent(self, event):
         if self.resizing:
             # Calculate new size maintaining aspect ratio
-            new_width = event.pos().x()
+            new_width = max(self.min_width, event.pos().x())  # Enforce minimum width
             aspect_ratio = self.original_pixmap.height() / self.original_pixmap.width()
             new_height = new_width * aspect_ratio
             
-            # Scale the pixmap
-            scaled_pixmap = self.original_pixmap.scaled(int(new_width), int(new_height), 
-                                                      Qt.KeepAspectRatio, 
-                                                      Qt.SmoothTransformation)
+            # Scale the pixmap with high quality
+            scaled_pixmap = self.original_pixmap.scaled(
+                int(new_width), 
+                int(new_height), 
+                Qt.KeepAspectRatio, 
+                Qt.SmoothTransformation
+            )
             self.setPixmap(scaled_pixmap)
+            # Update the scene immediately for smooth visual feedback
+            self.scene().update()
         else:
             super().mouseMoveEvent(event)
     
@@ -313,10 +327,20 @@ class PDFEditor(QMainWindow):
             if not file:
                 return
 
-            # Get the current pixmap with all annotations
-            pixmap = self.image_item.pixmap()
+            # Create a new pixmap to render everything
+            pixmap = QPixmap(self.scene.sceneRect().size().toSize())
+            pixmap.fill(Qt.white)  # Fill with white background
             
-            # Save as temporary image first
+            # Create painter for the new pixmap
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            
+            # Render the entire scene (including all items) to the pixmap
+            self.scene.render(painter)
+            painter.end()
+            
+            # Save as temporary image
             temp_image_path = "temp_image.png"
             pixmap.save(temp_image_path)
             
