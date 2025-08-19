@@ -272,11 +272,12 @@ class PDFEditor(QMainWindow):
 
         # PDF display with size policy
         self.view = QGraphicsView(self)
-        self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)  # Changed to AlwaysOn
-        self.view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)    # Changed to AlwaysOn
+        self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # Hide horizontal scrollbar
+        self.view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)     # Show vertical scrollbar
         self.view.setRenderHint(QPainter.Antialiasing)
         self.view.setRenderHint(QPainter.SmoothPixmapTransform)
-        self.view.setDragMode(QGraphicsView.ScrollHandDrag)  # Add drag scrolling
+        # Remove drag mode to disable clicking and dragging on document
+        # self.view.setDragMode(QGraphicsView.ScrollHandDrag)  
         self.scene = QGraphicsScene()
         self.view.setScene(self.scene)
         self.view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -361,16 +362,17 @@ class PDFEditor(QMainWindow):
 
     def add_text_at_position(self, scene_pos):
         """Handle adding text at the specified position"""
+        if not self.view.scene().sceneRect().contains(scene_pos):
+            return  # Ignore clicks outside the document area
+            
         text, ok = QInputDialog.getText(self, 'Add Text', 'Enter text:')
-        
         if ok and text:
-            text_item = MovableTextItem(text, self.undo_stack)  # Pass undo_stack
+            text_item = MovableTextItem(text, self.undo_stack)
             font = text_item.font()
             font.setPointSize(24)
             text_item.setFont(font)
             text_item.setDefaultTextColor(Qt.black)
             text_item.setPos(scene_pos)
-            
             self.undo_stack.push(AddItemCommand(self.scene, text_item))
 
     def add_signature_at_position(self, signature, scene_pos):
@@ -396,11 +398,11 @@ class PDFEditor(QMainWindow):
     def mousePressEvent(self, event):
         if not self.scene.items():
             return
-        if event.button() == Qt.LeftButton:
-            if self.mode == "text":
-                view_pos = self.view.mapFrom(self, event.pos())
-                scene_pos = self.view.mapToScene(view_pos)
-                self.add_text_at_position(scene_pos)
+        if event.button() == Qt.LeftButton and self.mode == "text":
+            view_pos = self.view.mapFrom(self, event.pos())
+            scene_pos = self.view.mapToScene(view_pos)
+            self.add_text_at_position(scene_pos)
+            self.mode = None  # Reset mode after adding text
 
     def mouseMoveEvent(self, event):
         if self.is_drawing and self.mode == "sign":
@@ -497,6 +499,17 @@ class PDFEditor(QMainWindow):
             sceneRect = self.view.transform().mapRect(self.scene.sceneRect())
             if sceneRect.width() < viewRect.width() and sceneRect.height() < viewRect.height():
                 self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+
+    # Add this new method to handle wheel events
+    def wheelEvent(self, event):
+        if self.view.verticalScrollBar().isVisible():
+            # Convert the delta calculation to an integer
+            delta = int(event.angleDelta().y() / 120)
+            current_value = self.view.verticalScrollBar().value()
+            new_value = current_value - (delta * 30)
+            # Ensure the value is an integer
+            self.view.verticalScrollBar().setValue(int(new_value))
+        event.accept()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
