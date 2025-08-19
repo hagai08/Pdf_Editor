@@ -15,13 +15,16 @@ class DrawingArea(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(380, 160)
+        # Create transparent canvas
         self.canvas = QPixmap(380, 160)
-        self.canvas.fill(Qt.white)
+        self.canvas.fill(Qt.transparent)  # Changed from white to transparent
         self.last_point = None
         self.is_drawing = False
 
     def paintEvent(self, event):
         painter = QPainter(self)
+        # Set white background for display only
+        painter.fillRect(self.rect(), Qt.white)
         painter.drawPixmap(0, 0, self.canvas)
 
     def mousePressEvent(self, event):
@@ -79,7 +82,8 @@ class SignatureDialog(QDialog):
         self.setLayout(layout)
 
     def get_signature(self):
-        return self.drawing_area.canvas.toImage()
+        # Convert to ARGB32_Premultiplied for transparency support
+        return self.drawing_area.canvas.toImage().convertToFormat(QImage.Format_ARGB32_Premultiplied)
 
 class MovableTextItem(QGraphicsTextItem):
     def __init__(self, text, parent=None):
@@ -134,14 +138,18 @@ class MovableTextItem(QGraphicsTextItem):
 
 class MovableSignatureItem(QGraphicsPixmapItem):
     def __init__(self, pixmap, parent=None):
-        super().__init__(pixmap, parent)
+        # Convert pixmap to support transparency
+        transparent_pixmap = QPixmap.fromImage(
+            pixmap.toImage().convertToFormat(QImage.Format_ARGB32_Premultiplied)
+        )
+        super().__init__(transparent_pixmap, parent)
         self.setFlag(QGraphicsItem.ItemIsMovable)
         self.setFlag(QGraphicsItem.ItemIsSelectable)
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges)
         
         self.resizing = False
         self.handle_size = 10
-        self.original_pixmap = pixmap
+        self.original_pixmap = transparent_pixmap  # Store transparent version
         self.min_width = 50  # Add minimum width limit
         
     def paint(self, painter, option, widget):
