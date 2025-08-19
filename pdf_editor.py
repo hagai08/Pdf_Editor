@@ -1,8 +1,9 @@
 import sys
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QFileDialog, QGraphicsView, 
                             QGraphicsScene, QGraphicsPixmapItem, QPushButton, 
-                            QMessageBox)  # Added QMessageBox here
-from PyQt5.QtGui import QPixmap, QPainter, QPen, QImage
+                            QMessageBox, QUndoStack, QUndoCommand, QShortcut,
+                            QStyle)  # Added QStyle here
+from PyQt5.QtGui import QPixmap, QPainter, QPen, QImage, QKeySequence, QIcon
 from PyQt5.QtCore import Qt, QPoint
 import fitz  # PyMuPDF
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, 
@@ -86,11 +87,13 @@ class SignatureDialog(QDialog):
         return self.drawing_area.canvas.toImage().convertToFormat(QImage.Format_ARGB32_Premultiplied)
 
 class MovableTextItem(QGraphicsTextItem):
-    def __init__(self, text, parent=None):
+    def __init__(self, text, undo_stack, parent=None):  # Add undo_stack parameter
         super().__init__(text, parent)
         self.setFlag(QGraphicsItem.ItemIsMovable)
         self.setFlag(QGraphicsItem.ItemIsSelectable)
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges)
+        self.old_pos = self.pos()
+        self.undo_stack = undo_stack  # Store undo_stack reference
         
         self.resizing = False
         self.handle_size = 10
@@ -111,6 +114,7 @@ class MovableTextItem(QGraphicsTextItem):
             painter.drawRect(x, y, self.handle_size, self.handle_size)
     
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
+        self.old_pos = self.pos()
         if (event.pos().x() > self.boundingRect().right() - self.handle_size and 
             event.pos().y() > self.boundingRect().bottom() - self.handle_size):
             self.resizing = True
@@ -133,11 +137,16 @@ class MovableTextItem(QGraphicsTextItem):
             super().mouseMoveEvent(event)
     
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
-        self.resizing = False
+        if self.resizing:
+            self.resizing = False
+        elif self.pos() != self.old_pos:
+            self.undo_stack.push(  # Use stored undo_stack reference
+                MoveItemCommand(self, self.old_pos, self.pos())
+            )
         super().mouseReleaseEvent(event)
 
 class MovableSignatureItem(QGraphicsPixmapItem):
-    def __init__(self, pixmap, parent=None):
+    def __init__(self, pixmap, undo_stack, parent=None):  # Add undo_stack parameter
         # Convert pixmap to support transparency
         transparent_pixmap = QPixmap.fromImage(
             pixmap.toImage().convertToFormat(QImage.Format_ARGB32_Premultiplied)
@@ -146,6 +155,8 @@ class MovableSignatureItem(QGraphicsPixmapItem):
         self.setFlag(QGraphicsItem.ItemIsMovable)
         self.setFlag(QGraphicsItem.ItemIsSelectable)
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges)
+        self.old_pos = self.pos()
+        self.undo_stack = undo_stack  # Store undo_stack reference
         
         self.resizing = False
         self.handle_size = 10
@@ -162,6 +173,7 @@ class MovableSignatureItem(QGraphicsPixmapItem):
             painter.drawRect(x, y, self.handle_size, self.handle_size)
     
     def mousePressEvent(self, event):
+        self.old_pos = self.pos()
         if (event.pos().x() > self.boundingRect().right() - self.handle_size and 
             event.pos().y() > self.boundingRect().bottom() - self.handle_size):
             self.resizing = True
@@ -189,8 +201,47 @@ class MovableSignatureItem(QGraphicsPixmapItem):
             super().mouseMoveEvent(event)
     
     def mouseReleaseEvent(self, event):
-        self.resizing = False
+        if self.resizing:
+            self.resizing = False
+        elif self.pos() != self.old_pos:
+            self.undo_stack.push(  # Use stored undo_stack reference
+                MoveItemCommand(self, self.old_pos, self.pos())
+            )
         super().mouseReleaseEvent(event)
+
+class AddItemCommand(QUndoCommand):
+    def __init__(self, scene, item):
+        super().__init__()
+        self.scene = scene
+        self.item = item
+        self.setText("Add Item")
+
+    def undo(self):
+        self.scene.removeItem(self.item)
+        self.scene.update()
+
+    def redo(self):
+        self.scene.addItem(self.item)
+        self.scene.update()
+
+class MoveItemCommand(QUndoCommand):
+    def __init__(self, item, old_pos, new_pos):
+        super().__init__()
+        self.item = item
+        self.old_pos = old_pos
+        self.new_pos = new_pos
+        self.scene = item.scene()  # Get scene reference from item
+        self.setText("Move Item")
+
+    def undo(self):
+        self.item.setPos(self.old_pos)
+        if self.scene:  # Check if scene exists
+            self.scene.update()
+
+    def redo(self):
+        self.item.setPos(self.new_pos)
+        if self.scene:  # Check if scene exists
+            self.scene.update()
 
 class PDFEditor(QMainWindow):
     def __init__(self):
@@ -227,6 +278,26 @@ class PDFEditor(QMainWindow):
         btn_sign.setGeometry(380, 620, 100, 40)
         btn_sign.clicked.connect(self.sign_mode)
 
+        # Add undo stack
+        self.undo_stack = QUndoStack(self)
+        
+        # Add keyboard shortcuts
+        QShortcut(QKeySequence.Undo, self, self.undo_stack.undo)
+        QShortcut(QKeySequence.Redo, self, self.undo_stack.redo)
+
+        # Add undo/redo buttons with arrows
+        btn_undo = QPushButton(self)
+        btn_undo.setGeometry(490, 620, 40, 40)  # Made width smaller since it's just an icon
+        btn_undo.setIcon(self.style().standardIcon(QStyle.SP_ArrowLeft))
+        btn_undo.setToolTip("Undo (Ctrl+Z)")  # Add tooltip to show keyboard shortcut
+        btn_undo.clicked.connect(self.undo_stack.undo)
+
+        btn_redo = QPushButton(self)
+        btn_redo.setGeometry(540, 620, 40, 40)  # Adjusted position due to new width
+        btn_redo.setIcon(self.style().standardIcon(QStyle.SP_ArrowRight))
+        btn_redo.setToolTip("Redo (Ctrl+Y)")  # Add tooltip to show keyboard shortcut
+        btn_redo.clicked.connect(self.undo_stack.redo)
+
         self.mode = None
 
     def open_pdf(self):
@@ -258,13 +329,14 @@ class PDFEditor(QMainWindow):
         text, ok = QInputDialog.getText(self, 'Add Text', 'Enter text:')
         
         if ok and text:
-            text_item = MovableTextItem(text)
+            text_item = MovableTextItem(text, self.undo_stack)  # Pass undo_stack
             font = text_item.font()
             font.setPointSize(24)
             text_item.setFont(font)
             text_item.setDefaultTextColor(Qt.black)
             text_item.setPos(scene_pos)
-            self.scene.addItem(text_item)
+            
+            self.undo_stack.push(AddItemCommand(self.scene, text_item))
 
     def add_signature_at_position(self, signature, scene_pos):
         """Handle adding signature at the specified position"""
@@ -272,10 +344,11 @@ class PDFEditor(QMainWindow):
         scaled_signature = signature_pixmap.scaled(200, 100, Qt.KeepAspectRatio, 
                                              Qt.SmoothTransformation)
         
-        signature_item = MovableSignatureItem(scaled_signature)
+        signature_item = MovableSignatureItem(scaled_signature, self.undo_stack)  # Pass undo_stack
         signature_item.setPos(scene_pos.x() - scaled_signature.width()/2,
                          scene_pos.y() - scaled_signature.height()/2)
-        self.scene.addItem(signature_item)
+        
+        self.undo_stack.push(AddItemCommand(self.scene, signature_item))
 
     def sign_mode(self):
         dialog = SignatureDialog(self)
