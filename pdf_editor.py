@@ -249,6 +249,9 @@ class PDFEditor(QMainWindow):
         self.setWindowTitle("Simple PDF Editor")
         self.setGeometry(100, 100, 900, 700)
 
+        # Initialize undo stack before creating buttons
+        self.undo_stack = QUndoStack(self)
+
         self.pdf_doc = None
         self.current_page = None
         self.current_page_index = 0
@@ -261,41 +264,36 @@ class PDFEditor(QMainWindow):
         self.scene = QGraphicsScene()
         self.view.setScene(self.scene)
 
-        # Buttons
+        # Buttons in order: Open PDF, Add Text, Sign, Save PDF
         btn_open = QPushButton("Open PDF", self)
         btn_open.setGeometry(50, 620, 100, 40)
         btn_open.clicked.connect(self.open_pdf)
 
-        btn_save = QPushButton("Save PDF", self)
-        btn_save.setGeometry(160, 620, 100, 40)
-        btn_save.clicked.connect(self.save_pdf)
-
         btn_text = QPushButton("Add Text", self)
-        btn_text.setGeometry(270, 620, 100, 40)
+        btn_text.setGeometry(160, 620, 100, 40)  # Adjusted position
         btn_text.clicked.connect(self.add_text_mode)
 
         btn_sign = QPushButton("Sign", self)
-        btn_sign.setGeometry(380, 620, 100, 40)
+        btn_sign.setGeometry(270, 620, 100, 40)  # Adjusted position
         btn_sign.clicked.connect(self.sign_mode)
 
-        # Add undo stack
-        self.undo_stack = QUndoStack(self)
-        
-        # Add keyboard shortcuts
-        QShortcut(QKeySequence.Undo, self, self.undo_stack.undo)
-        QShortcut(QKeySequence.Redo, self, self.undo_stack.redo)
+        btn_save = QPushButton("Save PDF", self)
+        btn_save.setGeometry(380, 620, 100, 40)  # Adjusted position
+        btn_save.clicked.connect(self.save_pdf)
 
-        # Add undo/redo buttons with arrows
+        # Undo/Redo buttons remain after the main buttons
         btn_undo = QPushButton(self)
-        btn_undo.setGeometry(490, 620, 40, 40)  # Made width smaller since it's just an icon
+        btn_undo.setGeometry(490, 620, 80, 40)
         btn_undo.setIcon(self.style().standardIcon(QStyle.SP_ArrowLeft))
-        btn_undo.setToolTip("Undo (Ctrl+Z)")  # Add tooltip to show keyboard shortcut
+        btn_undo.setText(" Undo")
+        btn_undo.setToolTip("Undo (Ctrl+Z)")
         btn_undo.clicked.connect(self.undo_stack.undo)
 
         btn_redo = QPushButton(self)
-        btn_redo.setGeometry(540, 620, 40, 40)  # Adjusted position due to new width
+        btn_redo.setGeometry(580, 620, 80, 40)
         btn_redo.setIcon(self.style().standardIcon(QStyle.SP_ArrowRight))
-        btn_redo.setToolTip("Redo (Ctrl+Y)")  # Add tooltip to show keyboard shortcut
+        btn_redo.setText(" Redo")
+        btn_redo.setToolTip("Redo (Ctrl+Y)")
         btn_redo.clicked.connect(self.undo_stack.redo)
 
         self.mode = None
