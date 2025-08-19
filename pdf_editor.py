@@ -360,21 +360,6 @@ class PDFEditor(QMainWindow):
     def add_text_mode(self):
         self.mode = "text"
 
-    def add_text_at_position(self, scene_pos):
-        """Handle adding text at the specified position"""
-        if not self.view.scene().sceneRect().contains(scene_pos):
-            return  # Ignore clicks outside the document area
-            
-        text, ok = QInputDialog.getText(self, 'Add Text', 'Enter text:')
-        if ok and text:
-            text_item = MovableTextItem(text, self.undo_stack)
-            font = text_item.font()
-            font.setPointSize(24)
-            text_item.setFont(font)
-            text_item.setDefaultTextColor(Qt.black)
-            text_item.setPos(scene_pos)
-            self.undo_stack.push(AddItemCommand(self.scene, text_item))
-
     def add_signature_at_position(self, signature, scene_pos):
         """Handle adding signature at the specified position"""
         signature_pixmap = QPixmap.fromImage(signature)
@@ -398,11 +383,23 @@ class PDFEditor(QMainWindow):
     def mousePressEvent(self, event):
         if not self.scene.items():
             return
-        if event.button() == Qt.LeftButton and self.mode == "text":
-            view_pos = self.view.mapFrom(self, event.pos())
-            scene_pos = self.view.mapToScene(view_pos)
-            self.add_text_at_position(scene_pos)
-            self.mode = None  # Reset mode after adding text
+        
+        # Convert the mouse position to scene coordinates
+        view_pos = self.view.mapFrom(self, event.pos())
+        scene_pos = self.view.mapToScene(view_pos)
+        
+        # Check if click is within the document bounds
+        if self.scene.sceneRect().contains(scene_pos):
+            # Show text input dialog
+            text, ok = QInputDialog.getText(self, 'Add Text', 'Enter text:')
+            if ok and text:
+                text_item = MovableTextItem(text, self.undo_stack)
+                font = text_item.font()
+                font.setPointSize(24)
+                text_item.setFont(font)
+                text_item.setDefaultTextColor(Qt.black)
+                text_item.setPos(scene_pos)
+                self.undo_stack.push(AddItemCommand(self.scene, text_item))
 
     def mouseMoveEvent(self, event):
         if self.is_drawing and self.mode == "sign":
