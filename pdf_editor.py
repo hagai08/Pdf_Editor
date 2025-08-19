@@ -2,12 +2,12 @@ import sys
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QFileDialog, QGraphicsView, 
                             QGraphicsScene, QGraphicsPixmapItem, QPushButton, 
                             QMessageBox, QUndoStack, QUndoCommand, QShortcut,
-                            QStyle)  # Added QStyle here
-from PyQt5.QtGui import QPixmap, QPainter, QPen, QImage, QKeySequence, QIcon
+                            QStyle, QFrame, QVBoxLayout, QHBoxLayout, 
+                            QSizePolicy, QInputDialog, QDialog, QLabel)  # Added QDialog and QLabel
+from PyQt5.QtGui import (QPixmap, QPainter, QPen, QImage, QKeySequence, 
+                        QIcon, QTransform)  # Added QTransform
 from PyQt5.QtCore import Qt, QPoint
 import fitz  # PyMuPDF
-from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, 
-                            QPushButton, QLabel, QFrame)
 from PyQt5.QtWidgets import (QGraphicsItem, QGraphicsTextItem, 
                            QGraphicsPixmapItem, QGraphicsSceneMouseEvent)
 from PyQt5.QtCore import QRectF, QPointF
@@ -247,9 +247,21 @@ class PDFEditor(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Simple PDF Editor")
-        self.setGeometry(100, 100, 900, 700)
+        # Convert float values to integers for geometry
+        screen = QApplication.primaryScreen().geometry()
+        self.setGeometry(
+            int(screen.width() * 0.1),  # Convert to int
+            int(screen.height() * 0.1), # Convert to int
+            int(screen.width() * 0.8),  # Convert to int
+            int(screen.height() * 0.8)  # Convert to int
+        )
 
-        # Initialize undo stack before creating buttons
+        # Create central widget and main layout
+        central_widget = QFrame()
+        self.setCentralWidget(central_widget)
+        layout = QVBoxLayout(central_widget)
+
+        # Initialize undo stack
         self.undo_stack = QUndoStack(self)
 
         self.pdf_doc = None
@@ -258,43 +270,59 @@ class PDFEditor(QMainWindow):
         self.is_drawing = False
         self.last_point = QPoint()
 
-        # PDF display
+        # PDF display with size policy
         self.view = QGraphicsView(self)
-        self.view.setGeometry(50, 50, 800, 550)
+        self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)  # Changed to AlwaysOn
+        self.view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)    # Changed to AlwaysOn
+        self.view.setRenderHint(QPainter.Antialiasing)
+        self.view.setRenderHint(QPainter.SmoothPixmapTransform)
+        self.view.setDragMode(QGraphicsView.ScrollHandDrag)  # Add drag scrolling
         self.scene = QGraphicsScene()
         self.view.setScene(self.scene)
+        self.view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        layout.addWidget(self.view)
 
+        # Button container
+        button_container = QFrame()
+        button_layout = QHBoxLayout(button_container)
+        button_container.setFixedHeight(50)  # Fixed height for buttons
+        
         # Buttons in order: Open PDF, Add Text, Sign, Save PDF
-        btn_open = QPushButton("Open PDF", self)
-        btn_open.setGeometry(50, 620, 100, 40)
-        btn_open.clicked.connect(self.open_pdf)
-
-        btn_text = QPushButton("Add Text", self)
-        btn_text.setGeometry(160, 620, 100, 40)  # Adjusted position
-        btn_text.clicked.connect(self.add_text_mode)
-
-        btn_sign = QPushButton("Sign", self)
-        btn_sign.setGeometry(270, 620, 100, 40)  # Adjusted position
-        btn_sign.clicked.connect(self.sign_mode)
-
-        btn_save = QPushButton("Save PDF", self)
-        btn_save.setGeometry(380, 620, 100, 40)  # Adjusted position
-        btn_save.clicked.connect(self.save_pdf)
-
-        # Undo/Redo buttons remain after the main buttons
-        btn_undo = QPushButton(self)
-        btn_undo.setGeometry(490, 620, 80, 40)
+        btn_open = QPushButton("Open PDF")
+        btn_text = QPushButton("Add Text")
+        btn_sign = QPushButton("Sign")
+        btn_save = QPushButton("Save PDF")
+        
+        # Undo/Redo buttons
+        btn_undo = QPushButton()
         btn_undo.setIcon(self.style().standardIcon(QStyle.SP_ArrowLeft))
         btn_undo.setText(" Undo")
         btn_undo.setToolTip("Undo (Ctrl+Z)")
-        btn_undo.clicked.connect(self.undo_stack.undo)
-
-        btn_redo = QPushButton(self)
-        btn_redo.setGeometry(580, 620, 80, 40)
+        
+        btn_redo = QPushButton()
         btn_redo.setIcon(self.style().standardIcon(QStyle.SP_ArrowRight))
         btn_redo.setText(" Redo")
         btn_redo.setToolTip("Redo (Ctrl+Y)")
+
+        # Add buttons to layout with spacing
+        button_layout.addWidget(btn_open)
+        button_layout.addWidget(btn_text)
+        button_layout.addWidget(btn_sign)
+        button_layout.addWidget(btn_save)
+        button_layout.addStretch()  # Add spacing between main buttons and undo/redo
+        button_layout.addWidget(btn_undo)
+        button_layout.addWidget(btn_redo)
+
+        # Connect button signals
+        btn_open.clicked.connect(self.open_pdf)
+        btn_text.clicked.connect(self.add_text_mode)
+        btn_sign.clicked.connect(self.sign_mode)
+        btn_save.clicked.connect(self.save_pdf)
+        btn_undo.clicked.connect(self.undo_stack.undo)
         btn_redo.clicked.connect(self.undo_stack.redo)
+
+        # Add button container to main layout
+        layout.addWidget(button_container)
 
         self.mode = None
 
@@ -309,21 +337,30 @@ class PDFEditor(QMainWindow):
         if not self.pdf_doc:
             return
         self.current_page = self.pdf_doc[self.current_page_index]
-        pix = self.current_page.get_pixmap(matrix=fitz.Matrix(2, 2))  # zoom x2
+        pix = self.current_page.get_pixmap(matrix=fitz.Matrix(2, 2))  # zoom x2 for better quality
         qimage = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format_RGB888)
         pixmap = QPixmap.fromImage(qimage)
+        
         self.scene.clear()
         self.image_item = QGraphicsPixmapItem(pixmap)
         self.scene.addItem(self.image_item)
         self.canvas = QImage(pixmap.size(), QImage.Format_ARGB32_Premultiplied)
         self.canvas.fill(Qt.transparent)
+        
+        # Set scene rect to match the pixmap size
+        self.scene.setSceneRect(self.image_item.boundingRect())
+        
+        # Don't auto-fit - show at 100% scale
+        self.view.setTransform(QTransform())  # Reset any existing transform
+        
+        # Center the content
+        self.view.centerOn(self.image_item)
 
     def add_text_mode(self):
         self.mode = "text"
 
     def add_text_at_position(self, scene_pos):
         """Handle adding text at the specified position"""
-        from PyQt5.QtWidgets import QInputDialog
         text, ok = QInputDialog.getText(self, 'Add Text', 'Enter text:')
         
         if ok and text:
@@ -450,6 +487,16 @@ class PDFEditor(QMainWindow):
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not save PDF: {str(e)}")
+
+    # Add resize event handler
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Only auto-fit if view is smaller than content
+        if hasattr(self, 'scene') and self.scene.items():
+            viewRect = self.view.viewport().rect()
+            sceneRect = self.view.transform().mapRect(self.scene.sceneRect())
+            if sceneRect.width() < viewRect.width() and sceneRect.height() < viewRect.height():
+                self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
