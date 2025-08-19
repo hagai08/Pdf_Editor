@@ -111,7 +111,7 @@ class PDFEditor(QMainWindow):
         btn_sign.setGeometry(380, 620, 100, 40)
         btn_sign.clicked.connect(self.sign_mode)
 
-        self.mode = None  # "text" or "sign"
+        self.mode = None
 
     def open_pdf(self):
         file, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF Files (*.pdf)")
@@ -136,28 +136,49 @@ class PDFEditor(QMainWindow):
     def add_text_mode(self):
         self.mode = "text"
 
+    def add_text_at_position(self, scene_pos):
+        """Handle adding text at the specified position"""
+        from PyQt5.QtWidgets import QInputDialog
+        text, ok = QInputDialog.getText(self, 'Add Text', 'Enter text:')
+        
+        if ok and text:
+            temp_pixmap = QPixmap(self.canvas.size())
+            temp_pixmap.fill(Qt.transparent)
+            
+            painter = QPainter(temp_pixmap)
+            painter.setPen(QPen(Qt.black, 2))
+            font = painter.font()
+            font.setPointSize(24)
+            painter.setFont(font)
+            painter.drawText(int(scene_pos.x()), int(scene_pos.y()), text)
+            painter.end()
+            
+            final_painter = QPainter(self.canvas)
+            final_painter.drawPixmap(0, 0, temp_pixmap)
+            final_painter.end()
+            
+            self.update_canvas()
+
+    def add_signature_at_position(self, signature, scene_pos):
+        """Handle adding signature at the specified position"""
+        painter = QPainter(self.canvas)
+        scaled_signature = signature.scaled(200, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        
+        x = int(scene_pos.x() - scaled_signature.width() / 2)
+        y = int(scene_pos.y() - scaled_signature.height() / 2)
+        
+        painter.drawImage(x, y, scaled_signature)
+        painter.end()
+        
+        self.update_canvas()
+
     def sign_mode(self):
         dialog = SignatureDialog(self)
         if dialog.exec_() == QDialog.Accepted:
-            # Convert signature to image
             signature = dialog.get_signature()
-            
-            # Get mouse position
             cursor_pos = self.view.mapFromGlobal(self.cursor().pos())
             scene_pos = self.view.mapToScene(cursor_pos)
-            
-            # Draw signature on canvas
-            painter = QPainter(self.canvas)
-            scaled_signature = signature.scaled(200, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            
-            # Position the signature at mouse position
-            x = int(scene_pos.x() - scaled_signature.width() / 2)
-            y = int(scene_pos.y() - scaled_signature.height() / 2)
-            
-            painter.drawImage(x, y, scaled_signature)
-            painter.end()
-            
-            self.update_canvas()
+            self.add_signature_at_position(signature, scene_pos)
 
     def mousePressEvent(self, event):
         if not self.scene.items():
@@ -167,32 +188,9 @@ class PDFEditor(QMainWindow):
                 self.is_drawing = True
                 self.last_point = event.pos()
             elif self.mode == "text":
-                # Convert window coordinates to scene coordinates
                 view_pos = self.view.mapFrom(self, event.pos())
                 scene_pos = self.view.mapToScene(view_pos)
-                
-                # Get text from user
-                from PyQt5.QtWidgets import QInputDialog
-                text, ok = QInputDialog.getText(self, 'Add Text', 'Enter text:')
-                
-                if ok and text:
-                    temp_pixmap = QPixmap(self.canvas.size())
-                    temp_pixmap.fill(Qt.transparent)
-                    
-                    painter = QPainter(temp_pixmap)
-                    painter.setPen(QPen(Qt.black, 2))
-                    font = painter.font()
-                    font.setPointSize(24)
-                    painter.setFont(font)
-                    painter.drawText(int(scene_pos.x()), int(scene_pos.y()), text)
-                    painter.end()
-                    
-                    # Update canvas with the new text
-                    final_painter = QPainter(self.canvas)
-                    final_painter.drawPixmap(0, 0, temp_pixmap)
-                    final_painter.end()
-                    
-                    self.update_canvas()
+                self.add_text_at_position(scene_pos)
 
     def mouseMoveEvent(self, event):
         if self.is_drawing and self.mode == "sign":
