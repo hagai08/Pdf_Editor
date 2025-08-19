@@ -1,0 +1,18 @@
+# Exclude all PDF files
+*.pdf
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+
+# IDE specific files
+.vscode/
+.idea/
+
+# Temporary files
+temp_image.png
