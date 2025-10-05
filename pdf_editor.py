@@ -256,28 +256,24 @@ class PDFEditor(QMainWindow):
             int(screen.height() * 0.8)  # Convert to int
         )
 
+        # Initialize undo stack
+        self.undo_stack = QUndoStack(self)
+
+        self.pdf_doc = None
+        self.page_items = []  # Add this to store all page items
+        # Remove current_page and current_page_index as they won't be needed
+        
         # Create central widget and main layout
         central_widget = QFrame()
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
 
-        # Initialize undo stack
-        self.undo_stack = QUndoStack(self)
-
-        self.pdf_doc = None
-        self.current_page = None
-        self.current_page_index = 0
-        self.is_drawing = False
-        self.last_point = QPoint()
-
-        # PDF display with size policy
+        # Modify the view settings
         self.view = QGraphicsView(self)
-        self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # Hide horizontal scrollbar
-        self.view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)     # Show vertical scrollbar
+        self.view.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.view.setRenderHint(QPainter.Antialiasing)
         self.view.setRenderHint(QPainter.SmoothPixmapTransform)
-        # Remove drag mode to disable clicking and dragging on document
-        # self.view.setDragMode(QGraphicsView.ScrollHandDrag)  
         self.scene = QGraphicsScene()
         self.view.setScene(self.scene)
         self.view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -331,8 +327,8 @@ class PDFEditor(QMainWindow):
         file, _ = QFileDialog.getOpenFileName(self, "Open PDF", "", "PDF Files (*.pdf)")
         if file:
             self.pdf_doc = fitz.open(file)
-            self.current_page_index = 0
-            self.show_page()
+            self.load_pdf_pages()
+            # Remove the fitInView call to maintain 100% scale
 
     def show_page(self):
         if not self.pdf_doc:
@@ -437,55 +433,99 @@ class PDFEditor(QMainWindow):
             return
             
         try:
-            # Get save location from user
             file, _ = QFileDialog.getSaveFileName(self, "Save PDF", "", "PDF Files (*.pdf)")
             if not file:
                 return
 
-            # Create a new pixmap to render everything
-            pixmap = QPixmap(self.scene.sceneRect().size().toSize())
-            pixmap.fill(Qt.white)  # Fill with white background
-            
-            # Create painter for the new pixmap
-            painter = QPainter(pixmap)
-            painter.setRenderHint(QPainter.Antialiasing)
-            painter.setRenderHint(QPainter.SmoothPixmapTransform)
-            
-            # Render the entire scene (including all items) to the pixmap
-            self.scene.render(painter)
-            painter.end()
-            
-            # Save as temporary image
-            temp_image_path = "temp_image.png"
-            pixmap.save(temp_image_path)
-            
             # Create a new PDF document
             new_doc = fitz.open()
             
-            # Get page dimensions
-            width = pixmap.width()
-            height = pixmap.height()
+            # For each page in our display
+            for i, (page_item, _) in enumerate(self.page_items):
+                # Get the page bounds
+                page_rect = page_item.sceneBoundingRect()
+                
+                # Create a pixmap of the current page with annotations
+                pixmap = QPixmap(int(page_rect.width()), int(page_rect.height()))
+                pixmap.fill(Qt.white)
+                
+                painter = QPainter(pixmap)
+                painter.setRenderHint(QPainter.Antialiasing)
+                painter.setRenderHint(QPainter.SmoothPixmapTransform)
+                
+                # Render only the current page area
+                self.scene.render(painter, QRectF(), page_rect)
+                painter.end()
+                
+                # Save current view as temporary image
+                temp_image_path = f"temp_image_{i}.png"
+                pixmap.save(temp_image_path)
+                
+                # Create new page in PDF
+                page = new_doc.new_page(width=pixmap.width(), height=pixmap.height())
+                page.insert_image(page.rect, filename=temp_image_path)
+                
+                # Clean up temporary file
+                import os
+                if os.path.exists(temp_image_path):
+                    os.remove(temp_image_path)
             
-            # Create a new page
-            page = new_doc.new_page(width=width, height=height)
-            
-            # Insert the image
-            rect = page.rect
-            page.insert_image(rect, filename=temp_image_path)
-            
-            # Save and close
+            # Save and close the document
             new_doc.save(file)
             new_doc.close()
             
-            # Clean up temporary file
-            import os
-            if os.path.exists(temp_image_path):
-                os.remove(temp_image_path)
-                
             QMessageBox.information(self, "Success", "PDF saved successfully!")
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not save PDF: {str(e)}")
+
+    def load_pdf_pages(self):
+        if not self.pdf_doc:
+            return
+            
+        self.scene.clear()
+        self.page_items = []
+        
+        current_y = 0
+        page_spacing = 20  # Space between pages
+        
+        for page_num in range(len(self.pdf_doc)):
+            # Get the page
+            page = self.pdf_doc[page_num]
+            # Render page to pixmap at 100% scale (72 DPI)
+            zoom = 2.1  # Adjust this value if needed for proper screen DPI
+            pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
+            qimage = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format_RGB888)
+            pixmap = QPixmap.fromImage(qimage)
+            
+            # Create page container without scaling
+            page_item = QGraphicsPixmapItem(pixmap)
+            page_item.setPos(0, current_y)
+            
+            # Add page number
+            text_item = QGraphicsTextItem(f"Page {page_num + 1}")
+            text_item.setDefaultTextColor(Qt.gray)
+            text_item.setPos(10, current_y + 10)
+            
+            # Add items to scene
+            self.scene.addItem(page_item)
+            self.scene.addItem(text_item)
+            self.page_items.append((page_item, text_item))
+            
+            # Update vertical position for next page
+            current_y += pixmap.height() + page_spacing
+        
+        # Set scene rect to contain all pages
+        self.scene.setSceneRect(self.scene.itemsBoundingRect())
+        
+        # Center the content horizontally
+        view_width = self.view.viewport().width()
+        scene_width = self.scene.itemsBoundingRect().width()
+        if scene_width < view_width:
+            offset = (view_width - scene_width) / 2
+            for page_item, text_item in self.page_items:
+                page_item.setPos(offset, page_item.pos().y())
+                text_item.setPos(offset + 10, text_item.pos().y())
 
     # Add resize event handler
     def resizeEvent(self, event):
