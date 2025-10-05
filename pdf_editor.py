@@ -433,19 +433,18 @@ class PDFEditor(QMainWindow):
             return
             
         try:
-            file, _ = QFileDialog.getSaveFileName(self, "Save PDF", "", "PDF Files (*.pdf)")
+            file, _ = QFileDialog.getSaveFileName(self, "Open PDF", "", "PDF Files (*.pdf)")
             if not file:
                 return
 
-            # Create a new PDF document
+            # Create new PDF document and copy original pages
             new_doc = fitz.open()
+            new_doc.insert_pdf(self.pdf_doc)
             
-            # For each page in our display
+            # For each page, save its annotations
             for i, (page_item, _) in enumerate(self.page_items):
-                # Get the page bounds
+                # Create pixmap for current page with annotations
                 page_rect = page_item.sceneBoundingRect()
-                
-                # Create a pixmap of the current page with annotations
                 pixmap = QPixmap(int(page_rect.width()), int(page_rect.height()))
                 pixmap.fill(Qt.white)
                 
@@ -453,25 +452,27 @@ class PDFEditor(QMainWindow):
                 painter.setRenderHint(QPainter.Antialiasing)
                 painter.setRenderHint(QPainter.SmoothPixmapTransform)
                 
-                # Render only the current page area
-                self.scene.render(painter, QRectF(), page_rect)
+                # Set the viewport to only render the current page area
+                source_rect = QRectF(page_rect)
+                target_rect = QRectF(0, 0, page_rect.width(), page_rect.height())
+                self.scene.render(painter, target_rect, source_rect)
                 painter.end()
+
+                # Save current page as temporary image
+                temp_path = f"temp_page_{i}.png"
+                pixmap.save(temp_path, "PNG", quality=95)
                 
-                # Save current view as temporary image
-                temp_image_path = f"temp_image_{i}.png"
-                pixmap.save(temp_image_path)
+                # Replace page content in new PDF
+                page = new_doc[i]
+                page.insert_image(page.rect, filename=temp_path)
                 
-                # Create new page in PDF
-                page = new_doc.new_page(width=pixmap.width(), height=pixmap.height())
-                page.insert_image(page.rect, filename=temp_image_path)
-                
-                # Clean up temporary file
+                # Clean up temp file
                 import os
-                if os.path.exists(temp_image_path):
-                    os.remove(temp_image_path)
-            
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+
             # Save and close the document
-            new_doc.save(file)
+            new_doc.save(file, garbage=3, deflate=True)
             new_doc.close()
             
             QMessageBox.information(self, "Success", "PDF saved successfully!")
