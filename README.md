@@ -10,6 +10,9 @@ A lightweight PDF editor built with **Python** and **PyQt5** that allows users t
 
 ---
 
+<img width="1087" height="679" alt="image" src="https://github.com/user-attachments/assets/bef3da7a-d1d5-44fd-871e-60628221445d" />
+
+
 ## Features
 
 ### PDF Handling
